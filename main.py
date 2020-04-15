@@ -158,7 +158,7 @@ if __name__ == '__main__':
         MaskGenerator(512, 512, 3), 
         target_size=(512, 512), 
         batch_size=args.batch_size, 
-        classes=['val'], 
+        # classes=['val'], 
         seed=42
     )
 
@@ -194,7 +194,7 @@ if __name__ == '__main__':
             axes[1].set_title('Predicted Image')
             axes[2].set_title('Original Image')
                     
-            plt.savefig(os.path.join(path, '/img_{}_{}.png'.format(i, pred_time)))
+            plt.savefig(os.path.join(path, 'img_{}_{}.png'.format(i, pred_time)))
             plt.close()
 
     # Load the model
@@ -215,7 +215,7 @@ if __name__ == '__main__':
         train_generator, 
         steps_per_epoch=10000,
         validation_data=val_generator,
-        validation_steps=1000,
+        validation_steps=3000,
         epochs=100,  
         verbose=0,
         callbacks=[

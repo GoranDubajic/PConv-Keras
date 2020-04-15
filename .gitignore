@@ -1,5 +1,8 @@
 # Repo-specific
 data/masks/*
+data/train*
+data/val*
+data/test*
 .vscode*
 
 # Byte-compiled / optimized / DLL files
