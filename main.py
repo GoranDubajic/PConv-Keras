@@ -1,4 +1,9 @@
 import os
+
+# To disable GPU training.
+os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"   # see issue #152
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
 import gc
 import datetime
 import numpy as np
@@ -19,8 +24,9 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import NullFormatter
 
 from libs.pconv_model import PConvUnet
-from libs.util import MaskGenerator
+from libs.util import MaskGenerator, MaskGeneratorFromDir
 
+from pathlib import Path
 
 # Sample call
 r"""
@@ -65,7 +71,7 @@ def parse_args():
         
     parser.add_argument(
         '-batch_size', '--batch_size',
-        type=int, default=4,
+        type=int, default=2,
         help='What batch-size should we use'
     )
 
@@ -98,26 +104,51 @@ def parse_args():
         type=str, 
         help='Previous weights to be loaded onto model'
     )
-        
+
+    parser.add_argument(
+        '-train_masks',
+        type=str, 
+        help='Masks.'
+    )
+
+    parser.add_argument(
+        '-val_masks',
+        type=str, 
+        help='Masks.'
+    )
+
+    parser.add_argument(
+        '-test_masks',
+        type=str, 
+        help='Masks.'
+    )
+
+    parser.add_argument(
+        '-seed',
+        type=int,
+        default=42,
+        help='Random seed. Default 42'
+    )
+
     return  parser.parse_args()
 
 
 class AugmentingDataGenerator(ImageDataGenerator):
     """Wrapper for ImageDataGenerator to return mask & image"""
-    def flow_from_directory(self, directory, mask_generator, *args, **kwargs):
-        generator = super().flow_from_directory(directory, class_mode=None, *args, **kwargs)        
-        seed = None if 'seed' not in kwargs else kwargs['seed']
+    def flow_from_directory(self, directory, mask_generator, seed, *args, **kwargs):
+        generator = super().flow_from_directory(directory, class_mode=None, seed=seed, *args, **kwargs)        
+        # seed = None if 'seed' not in kwargs else kwargs['seed']
         while True:
             
             # Get augmentend image samples
             ori = next(generator)
 
             # Get masks for each image sample            
-            mask = np.stack([
-                mask_generator.sample(seed)
-                for _ in range(ori.shape[0])], axis=0
-            )
-
+            # mask = np.stack([
+            #     mask_generator.sample(seed)
+            #     for _ in range(ori.shape[0])], axis=0
+            # )
+            mask = next(mask_generator)
             # Apply masks to all image sample
             masked = deepcopy(ori)
             masked[mask==0] = 1
@@ -138,38 +169,64 @@ if __name__ == '__main__':
 
     # Create training generator
     train_datagen = AugmentingDataGenerator(  
-        rotation_range=10,
         width_shift_range=0.1,
         height_shift_range=0.1,
         rescale=1./255,
         horizontal_flip=True
     )
+    train_mask_datagen = MaskGeneratorFromDir(
+        width_shift_range=0.1,
+        height_shift_range=0.1,
+        rescale=1./255,
+        horizontal_flip=True
+    )
+    train_mask_generator = train_mask_datagen.flow_from_directory(
+        args.train_masks,
+        target_size=(512, 512),
+        batch_size=args.batch_size,
+        class_mode=None,
+        seed=args.seed)
     train_generator = train_datagen.flow_from_directory(
         args.train, 
-        MaskGenerator(512, 512, 3),
+        train_mask_generator,
         target_size=(512, 512), 
-        batch_size=args.batch_size
+        batch_size=args.batch_size,
+        seed=args.seed
     )
 
     # Create validation generator
     val_datagen = AugmentingDataGenerator(rescale=1./255)
+    val_mask_datagen = MaskGeneratorFromDir(rescale=1./255)
+    val_mask_generator = val_mask_datagen.flow_from_directory(
+        args.val_masks,
+        target_size=(512, 512),
+        batch_size=args.batch_size,
+        class_mode=None,
+        seed=args.seed)
     val_generator = val_datagen.flow_from_directory(
         args.validation, 
-        MaskGenerator(512, 512, 3), 
+        val_mask_generator, 
         target_size=(512, 512), 
         batch_size=args.batch_size, 
         # classes=['val'], 
-        seed=42
+        seed=args.seed
     )
 
     # Create testing generator
     test_datagen = AugmentingDataGenerator(rescale=1./255)
+    test_mask_datagen = MaskGeneratorFromDir(rescale=1./255)
+    test_mask_generator = test_mask_datagen.flow_from_directory(
+        args.test_masks,
+        target_size=(512, 512),
+        batch_size=args.batch_size,
+        class_mode=None,
+        seed=args.seed)
     test_generator = test_datagen.flow_from_directory(
         args.test, 
-        MaskGenerator(512, 512, 3), 
+        test_mask_generator, 
         target_size=(512, 512), 
         batch_size=args.batch_size, 
-        seed=42
+        seed=args.seed
     )
 
     # Pick out an example to be send to test samples folder
@@ -184,7 +241,13 @@ if __name__ == '__main__':
         pred_img = model.predict([masked, mask])
         pred_time = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
 
+        p = Path(path)
+        p.mkdir(parents=True, exist_ok=True)
+        log_dir = p.joinpath("../test_samples_log")
+        log_dir.mkdir(parents=True, exist_ok=True)
+
         # Clear current output and display test images
+        print("\n")
         for i in range(len(ori)):
             _, axes = plt.subplots(1, 3, figsize=(20, 5))
             axes[0].imshow(masked[i,:,:,:])
@@ -193,9 +256,15 @@ if __name__ == '__main__':
             axes[0].set_title('Masked Image')
             axes[1].set_title('Predicted Image')
             axes[2].set_title('Original Image')
-                    
-            plt.savefig(os.path.join(path, 'img_{}_{}.png'.format(i, pred_time)))
+            plt_path = os.path.join(path, 'img_{}_{}.png'.format(i, pred_time))
+            plt.savefig(plt_path)
             plt.close()
+            # print(f"Plot path: {plt_path}")
+            save_original_image = False
+            if save_original_image:
+                npz_path = str(log_dir.joinpath(f"{i}"))
+                np.savez_compressed(npz_path, original=ori[i,:,:,:])
+                print(f"Saved original image to: {npz_path}.npz")
 
     # Load the model
     if args.vgg_path:
@@ -213,9 +282,9 @@ if __name__ == '__main__':
     # Fit model
     model.fit_generator(
         train_generator, 
-        steps_per_epoch=10000,
+        steps_per_epoch=2,
         validation_data=val_generator,
-        validation_steps=3000,
+        validation_steps=2,
         epochs=100,  
         verbose=0,
         callbacks=[

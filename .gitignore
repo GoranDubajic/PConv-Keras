@@ -3,6 +3,7 @@ data/masks/*
 data/train*
 data/val*
 data/test*
+data/rendered/
 .vscode*
 
 # Byte-compiled / optimized / DLL files

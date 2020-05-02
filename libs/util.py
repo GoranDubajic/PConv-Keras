@@ -4,6 +4,18 @@ import itertools
 import numpy as np
 import cv2
 
+from keras.preprocessing.image import ImageDataGenerator
+
+
+class MaskGeneratorFromDir(ImageDataGenerator):
+    def flow_from_directory(self, directory, target_size=(256,256), color_mode='rgb', classes=None, class_mode='categorical', batch_size=32, shuffle=True, seed=None, save_to_dir=None, save_prefix='', save_format='png', follow_links=False, subset=None, interpolation='nearest'):
+        generator =  super().flow_from_directory(directory, target_size=target_size, color_mode=color_mode, classes=classes, class_mode=class_mode, batch_size=batch_size, shuffle=shuffle, seed=seed, save_to_dir=save_to_dir, save_prefix=save_prefix, save_format=save_format, follow_links=follow_links, subset=subset, interpolation=interpolation)
+        assert seed != None
+        while True:
+            mask_is_black = next(generator)
+            mask_is_white = np.ones_like(mask_is_black) - mask_is_black
+            yield mask_is_white
+
 
 class MaskGenerator():
 
